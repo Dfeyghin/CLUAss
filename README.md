@@ -91,7 +91,7 @@ function Point:New(x, y)
     self.y = y or 0
 end
 ```
-###Create a new object of type Point ###
+### Create a new object of type Point ###
 
 	local p = Point(10, 20)
   
