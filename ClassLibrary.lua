@@ -15,8 +15,13 @@ This module is free software; you can redistribute it and/or modify it under
 the terms of the MIT license. See LICENSE for details.
 ​
 ​
---version 1.1--
+--version 1.2--
 ---------------
+
+Changelog v1.2:
+	--Added a bindableEvent generator method for clean and clear internal events creation
+	--Added a bindableFunction generator method for clean and clear internal function creation
+
 
 Changelog v1.1:
 	--Added a global destructor method
@@ -29,7 +34,7 @@ Changelog v1.1:
 --[[--------------------------------------------------------------------------------------------------------------------
 ​
 1.  require in any module script that intends to be implmeneting a class as follows : 
-	local Class = require(ReplicatedStorage.Libraries.Class).
+	local Class = require(ReplicatedFirst:WaitForChild("Libraries").Class).
 ​
 2.  to create a new class in said module: instead of creating a standard table via 'local module = {}' ,
 	use 'local classExample = Class()'.
@@ -60,7 +65,7 @@ FULL EXAMPLE:
 --Usage:
 --------
 ​
-	Class = require(ReplicatedStorage.Libraries.Class)
+	Class = require(ReplicatedFirst:WaitForChild("Libraries").Class)
 ​
 ​
 --Creating a new class:
@@ -114,7 +119,7 @@ FULL EXAMPLE:
 	end
 ​
 	Point = Class()
-	Point:Implement(PairPrinter)
+	Point:Implement(true, PairPrinter)
 ​
 	function Point:new(x, y)
 	  self.x = x or 0
@@ -152,6 +157,8 @@ FULL EXAMPLE:
 ​
 ]]----------------------------------------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------------
+local DESTRUCTION_DELAY = 1
+
 
 local Class = {}
 Class.__index = Class
@@ -164,11 +171,13 @@ end
 -- Extend method to create inheritance
 function Class:Extend()
 	local class = {}
-	--inherit the call wrapper:
-	class.__call = self.__call
-	class.__tostring = self.__tostring
+	--inherit the call wrapper and all metamethods:
+	for k,v in pairs(self) do
+		if k:sub(1,2) == "__" then
+			class[k] = self[k]
+		end
+	end
 	class.__index = class
-	
 	class.Parent = self
 	
 	setmetatable(class, self)
@@ -176,10 +185,10 @@ function Class:Extend()
 end
 
 -- Implement method to support interface compliance
-function Class:Implement(...)
+function Class:Implement(overide : boolean , ... : any)
 	for _, class in pairs({...}) do
 		for k, v in pairs(class) do
-			if self[k] == nil and type(v) == "function" then
+			if (overide or self[k] == nil) and type(v) == "function" then
 				self[k] = v
 			end
 		end
@@ -199,17 +208,50 @@ function Class:IsA(T)
 	return false
 end
 
+--generate a new event for the class and return it's ID for internal use and event instance for external use
+function Class:NewEvent(eventName)
+	if not self._events then self._events = {} end
+	local event = Instance.new("BindableEvent")
+	event.Name = eventName
+	table.insert(self._events, event)
+	return #self._events , event.Event
+end
+
+--generate a new event for the class and return it's ID for internal use and event instance for external use
+function Class:NewFunction(functionName)
+	if not self._functions then self._functions = {} end
+	local func = Instance.new("BindableFunction")
+	func.Name = functionName
+	table.insert(self._functions, func)
+	return #self._functions , func.OnInvoke
+end
+
+
+function Class:GetFunction(id)
+	if not id or not self._functions or not self._functions[id] then return end
+	return self._functions[id]
+end
+
+function Class:GetEvent(id)
+	if not id or not self._events or not self._events[id] then return end
+	return self._events[id]
+end
+
 --metamethod for when 'print(Class)' is called
 function Class:__tostring()
 	return "ClassObject"
 end
 
+--metamethod for when attempted to concat the table
+function Class.__concat(first, second)
+	return tostring(first)..tostring(second)
+end
+
 -- will execute upon a call of any class that extends this main Class.
 function Class:__call(...)
 	local obj = setmetatable({}, self)
+	obj._onDestroyEventId, obj.OnDestroy = obj:NewEvent("OnDestroy")
 	obj:New(...)
-	obj.__onDestroy = Instance.new("BindableEvent")
-	obj.OnDestroy = obj.__onDestroy.Event
 	return obj
 end
 
@@ -218,11 +260,13 @@ end
 local function Destroy(target)
 	for k,v in pairs(target) do
 		if typeof(target[k]) == "table" then
-			Destroy(target[k]) --call recursively destroy function on the table
+			if target[k]["Destroy"] then target[k]:Destroy() else Destroy(target[k]) end --call recursively destroy function on the table
 		elseif typeof(target[k]) == "RBXScriptConnection" then 
 			target[k]:Disconnect()
 		elseif typeof(target[k]) == "Instance" then
 			target[k]:Destroy()
+		elseif typeof(target[k]) == "thread" then --kill running tasks
+			task.cancel(target[k])
 		end
 		target[k] = nil
 	end
@@ -232,8 +276,8 @@ end
 
 -- Global destructor to destroy object and leave no memory traces
 function Class:Destroy()
-	self.__onDestroy:Fire()
-	Destroy(self)
+	if self:GetEvent(self._onDestroyEventId) then self:GetEvent(self._onDestroyEventId):Fire() end
+	task.delay(DESTRUCTION_DELAY, function() Destroy(self) end)
 end
 
 
